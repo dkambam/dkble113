@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<project>
+	<hardware in="usart-hardware.xml" />
+	<gatt in="usart-gatt.xml" />
+	<device type="ble113" />
+	<!-- <ocnfig in="config.xml" /> -->
+
+	<script in="usart-script.bgs" />
+	<image out="usart-demo-fw.hex" />
+</project>
