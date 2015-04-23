@@ -10,7 +10,7 @@ Reading serial data from bluegiga-dkble113 usart port
 
 ## Expected behavior
 Should display message on serial monitor as follows on reset.
-[outpu-image](output.jpg)
+![output-image](output.jpg)
 
 
 [1]: board-config.jpg
