@@ -1,0 +1,375 @@
+# ================================================================
+# Lifeshel Helmet Multislave
+# Ardya Dipta Nandaviri 
+# ardyadipta@gmail.com
+# adopted from bluegiga sample project: Multislave_demo
+# ----------------------------------------------------------------
+#
+# Change log: see GitHub history
+# 
+#
+# ================================================================
+
+dim connected
+dim encrypted
+dim indicate_ready
+dim flip
+
+dim i
+dim temp_buf(4)
+dim j               # throw-away container for result code
+
+dim disconnect      # variable that indicates whether the device is disconnected by the user or not
+
+# Hardware configuration constant
+# INPUT:
+dim   hw_port_0_pins         #  configuration variable for ON switches
+dim   hw_port_1_pins         #  configuration variable for OFF switches
+
+const EMERGENCY_SWITCH_ON   = 2      # connect to P0_1
+const FLASH_SWITCH_ON       = 4      # connect to P0_2
+const FIRE_SWITCH_ON        = 32     # connect to P0_5
+const SPILL_SWITCH_ON       = 16     # connect to P0_4
+
+const EMERGENCY_SWITCH_OFF   = 4     # connect to P1_2
+const FLASH_SWITCH_OFF       = 1     # connect to P1_0
+const FIRE_SWITCH_OFF        = 8     # connect to P1_3
+const SPILL_SWITCH_OFF       = 16    # connect to P1_4
+
+const FALLING_EDGE = 1     # falling edge configuration
+const RISING_EDGE  = 0     # rising edge for configuration
+
+# OUTPUT
+# LED       P0_6
+# Wake up   P1_7
+const HW_PORT_led = 0               # port 0
+const HW_PIN_led = $40              # connect to P0_6 --> 0b01000000
+const HW_PORT_wake = 1              # port 1
+const HW_PIN_wake = $80             # connect to P1_7 --> 0b10000000
+
+# constant for package configuration
+# first 2 bytes will be used for EMERGENCY, FIRE, and SPILL
+# next  6 bytes will be used for storing chip's SERIAL for identification
+# EMERGENCY & FIRE will be the first byte (package_sent(0:1))
+# SPILL will be the second byte           (package_sent(1:1))
+# one more switch status can be added in the future if needed
+# example, the reading of EMERGENCY would be : 10 00
+#               the reading of FIRE would be : 01 00
+#               the reading of FIRE & SPILL  : 01 10
+#                              all status ON : 11 10
+dim package_sent(8)
+const EMERGENCY_OK = $10   # when emergency is on,  package_sent(0:1) = package_sent(0:1) | $10
+const NO_EMERGENCY = $01   # when emergency is off, package_sent(0:1) = package_sent(0:1) & $01
+const FIRE_OK      = $01   # when fire is on,  package_sent(0:1) = package_sent(0:1) | $01
+const NO_FIRE      = $10   # when fire is off, package_sent(0:1) = package_sent(0:1) & $10 
+const SPILL_OK     = $10   # when spill is on,  package_sent(1:1) = package_sent(0:1) | $10
+const NO_SPILL     = $01   # when spill is off, package_sent(1:1) = package_sent(0:1) & $01 
+
+
+#timing constant for timer
+const TEN_MS    = $148              # 10  ms
+const TWENTY_MS = $290              # 20  ms
+const FIFTY_MS  = 1640              # 50  ms
+const HUNDRED_MS = 3277             # 100 ms
+const ONE_S     = $8000             # 1 second
+const ONE_MIN = $1E0000             # 1 minute
+
+#handles
+const TH_alarm = 2              #Timer handle that controls LED
+const TH_disconnect = 3         #Timer handle that disconnects
+
+#debouncing variables
+dim last_press              # variable to store the time stamp of the last press event happens, for debouncing
+dim emergency_status        # store the status of emergency switch
+dim flash_status            # store the status of flash switch
+dim debouncing_time
+
+event system_boot(major, minor, patch, build, ll_version, protocol_version, hw)
+    # DEBUG
+    #call system_endpoint_tx(system_endpoint_uart1, 6, "BOOT\r\n")
+
+    # initialize status
+    connected = 0
+    encrypted = 0
+    indicate_ready = 0
+
+    # set the debouncing time
+    debouncing_time = TEN_MS
+    #Initiate required variables
+    emergency_status = 0
+    flash_status = 0
+    flip = 0
+    disconnect = 1
+
+    # set the configuration pins
+    hw_port_0_pins = EMERGENCY_SWITCH_ON + FLASH_SWITCH_ON + FIRE_SWITCH_ON  + SPILL_SWITCH_ON
+    hw_port_1_pins = EMERGENCY_SWITCH_OFF + FLASH_SWITCH_OFF + FIRE_SWITCH_OFF  + SPILL_SWITCH_OFF
+
+    # get read-only module serial number from registers
+    call system_reg_read($780e)(j, package_sent(2:1))
+    call system_reg_read($780f)(j, package_sent(3:1))
+    call system_reg_read($7810)(j, package_sent(4:1))
+    call system_reg_read($7811)(j, package_sent(5:1))
+    call system_reg_read($7812)(j, package_sent(6:1))
+    call system_reg_read($7813)(j, package_sent(7:1))
+    # get module's MAC address
+    # call system_address_get()(serial_buf(6:6))
+    call attributes_write(c_device_name, 0, 6, package_sent(2:6))
+
+    #initiate the package value
+    package_sent(0:2) = "\x00\x00"
+
+     # Set the INPUT Switches
+    call hardware_io_port_config_irq(0,hw_port_0_pins,FALLING_EDGE)
+    call hardware_io_port_config_irq(1,hw_port_1_pins,RISING_EDGE)
+
+    ## Set the LED and Wake Up pin as OUTPUT
+    # P1_7(The wake up pin)
+    call hardware_io_port_config_direction(HW_PORT_wake, HW_PIN_wake)
+    # This is for the LED pin P0_6
+    call hardware_io_port_config_direction(HW_PORT_led, HW_PIN_led)
+
+    # Initialize the LED, turn off the LED first
+    call hardware_io_port_write(HW_PORT_led, HW_PIN_led, 0)
+
+
+
+    # initiate timer for LED. using P0_6
+    # at timer 1, P0_6 is channel 4, alternate 2
+    # turn off the LED
+    call hardware_timer_comparator(1, 4, 6, 0)
+    call hardware_set_soft_timer(0, TH_alarm,0)
+    
+    # Use all three advertisement channels  
+    # set advertisement interval to 200-300ms
+    #call gap_set_adv_parameters(320, 480, 7)
+    call gap_set_adv_parameters(200, 200, 0)
+
+    # At first, BLE is in sleep mode, Wake Up pin to low
+    call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 0)
+end
+
+# catch connection update event
+event connection_status(connection, flags, address, address_type, conn_interval, timeout, latency, bonding)
+    # check for "new connection established" update
+    if (flags & $05) = $05 then
+        # DEBUG
+        #call system_endpoint_tx(system_endpoint_uart1, 20, "CONNECTED AS SLAVE\r\n")
+        
+        # update status
+        connected = 1
+    end if
+
+    # check for "encrypted" status update (i.e. paired)
+    if (flags & $02) = $02 then
+        # DEBUG
+        #call system_endpoint_tx(system_endpoint_uart1, 11, "ENCRYPTED\r\n")
+        
+        # update status
+        encrypted = 1
+    end if
+end
+
+# catch disconnection event
+event connection_disconnected(handle, result)
+    # update status
+    connected = 0
+    encrypted = 0
+    indicate_ready = 0
+
+    # if the device is disconnected accidentally, for example, due to out of range,
+    # immediately re-broadcast again
+    if disconnect = 0 then
+       call gap_set_mode(gap_general_discoverable, gap_undirected_connectable) # begin discovery
+    end if
+
+end
+
+# catch timer tick (used for master/slave ping-pong and other things)
+event hardware_soft_timer(handle)
+    
+    if handle=TH_alarm then
+        call attributes_write(c_status_control, 0, 8, package_sent(0:8))
+        #This loop goes as long as needed switching between high and low frequency PWM  
+        if flip = 0 then
+            flip = 1
+            # channel 4 is LED (P0_6) is 50% duty cycle (5000 / 10000 = 0.5)
+            call hardware_timer_comparator(1, 4, 6, 8300)
+        else if flip = 1 then
+                flip = 0
+                # channel 4 is LED (P0_6) is 50% duty cycle (5000 / 10000 = 0.5)
+                call hardware_timer_comparator(1, 4, 6, 0)
+            end if
+        end if
+    end if
+
+    if handle = TH_disconnect then
+        disconnect = 1 # indicates that the user trigger the disconnection
+        call attributes_write(c_status_control, 0, 8, package_sent(0:8))
+        call connection_disconnect(0)
+        call gap_set_mode(gap_non_discoverable, gap_non_connectable)
+        call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 0)
+    end if
+end
+
+# catch status update so we know when the other client is connected + subscribed
+event attributes_status(handle, flags)
+    if handle = c_status_control then
+        if flags = 2 then
+            # DEBUG
+            #call system_endpoint_tx(system_endpoint_uart1, 21, "INDICATIONS ENABLED\r\n")
+            # start continuous 1-second timer so we can "ping" the master
+            #call hardware_set_soft_timer($1000,TH_alarm,0)
+            # update status
+            indicate_ready = 1
+        else
+            # DEBUG
+            #call system_endpoint_tx(system_endpoint_uart1, 22, "INDICATIONS DISABLED\r\n")
+
+            # start continuous 1-second timer
+            #call hardware_set_soft_timer(0, 0, 0)
+            #call hardware_set_soft_timer(0,TH_alarm,0)
+
+            # update status
+            indicate_ready = 0
+        end if
+    end if
+end
+
+# catch remote write of characteristic value
+event attributes_value(connection, reason, handle, offset, value_len, value_data)
+    if handle = c_status_control then
+        # DEBUG (rudimentary binary-to-ASCII-HEX loop to display all 4 written bytes)
+        #call system_endpoint_tx(system_endpoint_uart1, 8, "MASTER: ")
+        i = 0
+        while i < value_len
+            temp_buf(0:1) = (value_data(i:1)/$10) + 48 + ((value_data(i:1)/$10)/10*7)
+            temp_buf(1:1) = (value_data(i:1)&$f)  + 48 + ((value_data(i:1)&$f )/10*7)
+            temp_buf(2:1) = $20 # ' '
+            #call system_endpoint_tx(system_endpoint_uart1, 3, temp_buf(0:3))
+            i = i + 1
+        end while
+        #call system_endpoint_tx(system_endpoint_uart1, 2, "\r\n")
+    end if
+end
+
+# catch interrupts for input pins (P0_0 rising edge in this demo)
+event hardware_io_port_status(timestamp, port, irq, state)
+
+    # For flash, it is better to not using software debouncing.
+    # based on the experiment, it is sufficient only to use capacitor as debouncer
+    if port = 0 then #Port 0 is associated with ON switches
+        if(irq & FLASH_SWITCH_ON) = FLASH_SWITCH_ON then 
+            flash_status = 1
+            #  Check if the Emergency is ON of OFF
+            #  if OFF, then turn on the LED all the time
+
+            emergency_status = package_sent(0:1) + package_sent(1:1)
+            if emergency_status = 0 then
+                call hardware_timer_comparator(1, 4, 6, 100)           
+            end if
+            #  if emergency is ON, then ignore, keep the LED flashing ON and OFF
+        end if
+    end if
+
+    if port = 1  then #Port 1 is associated with OFF switches
+            if (irq & FLASH_SWITCH_OFF) = FLASH_SWITCH_OFF then 
+                flash_status = 0
+                # if the emergency switch is OFF, turn off the LED and back to sleep
+                if emergency_status = 0 then 
+                    call hardware_timer_comparator(1, 4, 6, 0)
+                    call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 0)
+                end if
+            end if
+    end if
+
+    # uncomment these 2 lines for debouncing
+    if (timestamp-last_press) >= debouncing_time || (timestamp < last_press && ($7FFFFFFF - last_press + timestamp) > debouncing_time) then
+        last_press = timestamp
+        ###### debouncing done
+        #call system_endpoint_tx(system_endpoint_uart1, 9, "PRESSED\r\n")
+        disconnect = 0
+ 
+        if port = 0 then #Port 0 is associated with ON switches
+            if(irq & EMERGENCY_SWITCH_ON) = EMERGENCY_SWITCH_ON then
+                package_sent(0:1) = package_sent(0:1) | EMERGENCY_OK # set the package for emergency status
+                call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 255) # Wake up the device
+                call hardware_set_soft_timer(0, TH_disconnect,1)  # turn off disconnect timer
+                call hardware_set_soft_timer($1000,TH_alarm,0)    # start the timer for alarm
+                call gap_set_mode(gap_general_discoverable, gap_undirected_connectable) # begin discovery
+            end if
+
+            if(irq & FIRE_SWITCH_ON) = FIRE_SWITCH_ON then
+                package_sent(0:1) = package_sent(0:1) | FIRE_OK # set the package for FIRE status 
+                call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 255) # Wake up the device
+                call hardware_set_soft_timer(0, TH_disconnect,1)  # turn off disconnect timer
+                call hardware_set_soft_timer($1000,TH_alarm,0)    # start the timer for alarm
+                call gap_set_mode(gap_general_discoverable, gap_undirected_connectable) # begin discovery
+            end if
+
+            if(irq & SPILL_SWITCH_ON) = SPILL_SWITCH_ON then
+                package_sent(1:1) = package_sent(1:1) | SPILL_OK # set the package for SPILL status
+                call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 255) # Wake up the device
+                call hardware_set_soft_timer(0, TH_disconnect,1)  # turn off disconnect timer 
+                call hardware_set_soft_timer($1000,TH_alarm,0)    # start the timer for alarm
+                call gap_set_mode(gap_general_discoverable, gap_undirected_connectable) # begin discovery
+            end if
+
+        end if
+
+        if port = 1  then
+            if (irq & EMERGENCY_SWITCH_OFF) = EMERGENCY_SWITCH_OFF then 
+                package_sent(0:1) = package_sent(0:1) & NO_EMERGENCY
+                emergency_status = package_sent(0:1) + package_sent(1:1)
+                if emergency_status = 0 then
+                    call hardware_set_soft_timer(0,TH_alarm,0)
+                    call hardware_set_soft_timer($2000, TH_disconnect,1)
+                    call hardware_timer_comparator(1, 4, 6, 0) #Turn off the LED
+                    
+                    if flash_status = 1 then #if the Flash status is ON, turn ON the LED
+                        call hardware_timer_comparator(1, 4, 6, 8300)
+                    else   # turn the device back to sleep
+                        call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 0)
+                    end if
+                end if
+            end if
+
+            if (irq & FIRE_SWITCH_OFF) = FIRE_SWITCH_OFF then 
+                package_sent(0:1) = package_sent(0:1) & NO_FIRE
+                emergency_status = package_sent(0:1) + package_sent(1:1)
+
+                if emergency_status = 0 then
+                    call hardware_set_soft_timer(0,TH_alarm,0)
+                    call hardware_set_soft_timer($3000, TH_disconnect,1)
+                    call hardware_timer_comparator(1, 4, 6, 0) #Turn off the LED
+                    call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 0)
+                    
+                    if flash_status = 1 then #if the Flash status is ON, turn ON the LED
+                        call hardware_timer_comparator(1, 4, 6, 8300)
+                        
+                    else   # turn the device back to sleep
+                        call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 0)
+                    end if
+                end if
+            end if
+
+            if (irq & SPILL_SWITCH_OFF) = SPILL_SWITCH_OFF then 
+                package_sent(1:1) = package_sent(1:1) & NO_SPILL
+                emergency_status = package_sent(0:1) + package_sent(1:1)
+                if emergency_status = 0 then
+                    call hardware_set_soft_timer(0,TH_alarm,0)
+                    call hardware_set_soft_timer($3000, TH_disconnect,1)
+                    call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 0)
+                    call hardware_timer_comparator(1, 4, 6, 0) #Turn off the LED
+                    
+                    if flash_status = 1 then #if the Flash status is ON, turn ON the LED
+                        call hardware_timer_comparator(1, 4, 6, 8300)
+                    else   # turn the device back to sleep
+                        call hardware_io_port_write(HW_PORT_wake, HW_PIN_wake, 0)
+                    end if
+                end if
+            end if
+        end if
+    # uncomment this for debouncing
+    end if
+end
