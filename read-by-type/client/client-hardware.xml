@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<hardware>
+	<script enable="true" />
+
+	<!-- Enable to sleep: conserve power -->
+	<sleeposc enable="true" ppm="30" />
+	<sleep enable="true" />
+
+	<!-- Configure IO -->
+	<port index="0" tristatemask="0x00" pull="up" />
+	<port index="1" tristatemask="0x00" pull="up" />
+
+	<!-- Configure Timer -->
+	<!-- <timer index="1" alternate="2" enabled_channels="0x10" mode="2" divisor="0"/> -->
+
+	<!-- Configure USART -->
+	<usart channel="1" baud="115200" alternate="1" endpoint="none" mode="uart" flow="false" />
+
+</hardware>

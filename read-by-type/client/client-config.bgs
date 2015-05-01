@@ -1,0 +1,9 @@
+export dim SCAN_INTERVAL
+export dim SCAN_WINDOW
+export dim ACTIVE_SCAN_STATUS
+
+export procedure config_init()
+	SCAN_INTERVAL = $4B
+	SCAN_WINDOW = $32
+	ACTIVE_SCAN_STATUS = 0
+end

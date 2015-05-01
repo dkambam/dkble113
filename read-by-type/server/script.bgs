@@ -1,0 +1,11 @@
+
+dim result
+event system_boot(major, minor, patch, build, ll_version, protocol_version, hw)
+    call gap_set_adv_parameters(200, 200, $07)(result)
+    call gap_set_mode(gap_general_discoverable, gap_undirected_connectable)(result)
+end
+
+
+event connection_disconnected(connection, reason)
+    call gap_set_mode(gap_general_discoverable, gap_undirected_connectable)(result)
+end

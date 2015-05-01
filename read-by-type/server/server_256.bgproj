@@ -4,6 +4,6 @@
     <hardware in="hardware.xml" />
     <script in="script.bgs" />
 	<config in="config.xml" />
-    <device type="ble113"/>
-    <image out="read_by_type.hex" />
+    <device type="ble113" memory="256"/>
+    <image out="read_by_type_server.hex" />
 </project>

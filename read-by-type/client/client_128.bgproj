@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<project>
+	<hardware in="client-hardware.xml" />
+	<gatt in="client-gatt.xml" />
+	<device type="ble113" />
+	<!-- <ocnfig in="config.xml" /> -->
+
+	<script in="client-script.bgs" />
+	<image out="client-fw.hex" />
+</project>

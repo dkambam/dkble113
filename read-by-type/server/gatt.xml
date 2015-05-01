@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<configuration>
+
+    <service uuid="1800" id="generic_access">
+        <description>Generic Access</description>
+
+        <characteristic uuid="2A00">
+            <description>Device Name</description>
+            <properties read="true" const="true"/>
+            <value>Demo-SERVER</value>
+        </characteristic>
+
+        <characteristic uuid="2A01">
+            <description>Appearance</description>
+            <properties read="true" const="true" />
+            <value type="hex">0100</value>
+        </characteristic>
+    </service>
+
+
+    <service uuid="180A" id="device_information">
+        <description>Device Information</description>
+    
+        <characteristic uuid="2A29">
+            <description>Manufacturer Name</description>
+            <properties read="true" const="true" />
+            <value>Bluegiga</value>
+        </characteristic>
+
+        <characteristic uuid="2A24">
+            <description>Model Number</description>
+            <properties read="true" const="true" />
+            <value>Multislave Demo Slave Device</value>
+        </characteristic>
+    </service>
+
+</configuration>

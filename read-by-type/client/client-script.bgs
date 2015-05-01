@@ -1,0 +1,11 @@
+import "client-config.bgs"
+
+dim result
+event system_boot(major, minor, patch, build, ll_version, protocol_version, hw)
+	call system_endpoint_tx(system_endpoint_uart1, 17, "System Boot Event")(result)
+
+
+	call config_init()
+	call gap_set_scan_parameters(SCAN_INTERVAL, SCAN_WINDOW, ACTIVE_SCAN_STATUS)
+
+end
